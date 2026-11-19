@@ -12,6 +12,7 @@ import app.toque.core.json.obj
 import app.toque.core.json.str
 import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.Recipe
+import app.toque.core.recipes.RecipeImageKey
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -173,7 +174,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         }
     }
 
-    /** Photo réduite (800 px de large au plus), enregistrée sous le nom de fichier de l'URL. */
+    /** Photo réduite (800 px de large au plus), indexée par son URL complète. */
     private fun savePhoto(url: String) {
         val bytes = download(url, emptyMap(), 8 * 1024 * 1024)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -188,7 +189,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             if (scaled !== bmp) bmp.recycle()
             bmp = scaled
         }
-        val name = url.substringAfterLast('/').substringBefore('?')
+        val name = RecipeImageKey.fileName(url)
         val tmp = File(repo.imagesDir, "$name.part")
         FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         bmp.recycle()

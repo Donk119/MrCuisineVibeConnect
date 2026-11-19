@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeCodec
+import app.toque.core.recipes.RecipeImageKey
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.SearchIndex
 import java.io.File
@@ -182,6 +183,11 @@ class RecipeRepo(private val context: Context) {
 
     fun imageFile(name: String): File? {
         if (name.isBlank()) return null
+        if (name.startsWith("http://", ignoreCase = true) || name.startsWith("https://", ignoreCase = true)) {
+            val unique = File(imagesDir, RecipeImageKey.fileName(name))
+            if (unique.exists() && unique.length() > 0) return unique
+            if (!RecipeImageKey.allowsLegacyFallback(name)) return null
+        }
         val clean = name.substringAfterLast('/')
         for (candidate in listOf("large-$clean", clean, "small-$clean")) {
             val f = File(imagesDir, candidate)
