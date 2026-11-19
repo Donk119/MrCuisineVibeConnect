@@ -59,6 +59,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         // 1. Toutes les listes sélectionnées doivent être complètes avant toute modification.
         progress(tr("Liste des recettes…"))
         val entriesById = LinkedHashMap<Long, McOnline.Entry>()
+        val communityIds = HashSet<Long>()
         try {
             for (source in McOnline.sources(includeCommunity)) {
                 val feedIds = HashSet<Long>()
@@ -78,7 +79,10 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                     for (entry in p.entries) {
                         require(feedIds.add(entry.apiId)) { "Duplicate recipe ID in ${source.apiValue}: ${entry.apiId}" }
                         // An API recipe can move between sources; keep its stable web-<id> identity.
-                        if (!entriesById.containsKey(entry.apiId)) entriesById[entry.apiId] = entry
+                        if (!entriesById.containsKey(entry.apiId)) {
+                            entriesById[entry.apiId] = entry
+                            if (source == McOnline.CatalogueSource.MEMBER) communityIds += entry.apiId
+                        }
                     }
                     progress(tr("Liste des recettes… %d / %d", page, pages))
                     page++
@@ -92,7 +96,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val entries = ArrayList(entriesById.values)
         if (entries.isEmpty()) return LidlSync.Report(false, tr("Aucune recette reçue du serveur"))
 
-        // 2. Fiches nouvelles ou modifiées ; pour les autres, seuls l'auteur et la note sont mis à jour.
+        // 2. Fiches nouvelles ou modifiées ; notes et origine des fiches en cache sont actualisées.
         val present = repo.ids()
         val todo = entries.filter { e ->
             McOnline.updatedOf(index[e.apiId.toString()]) != e.updated || McOnline.toqueId(e.apiId) !in present
@@ -101,9 +105,11 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val rescored = ArrayList<Recipe>()
         for (e in entries) {
             val key = e.apiId.toString()
-            if (e.apiId in todoIds || index[key] == e.stamp) continue
+            if (e.apiId in todoIds) continue
             val r = repo.get(McOnline.toqueId(e.apiId)) ?: continue
-            rescored += McOnline.withScore(r, e)
+            val isCommunity = e.apiId in communityIds
+            if (index[key] == e.stamp && r.isCommunity == isCommunity) continue
+            rescored += McOnline.withScore(r, e).copy(isCommunity = isCommunity)
             index[key] = e.stamp
             if (rescored.size >= 100) save(rescored, index, language)
         }
@@ -115,6 +121,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             progress(tr("Recettes : %d / %d", i + 1, todo.size))
             try {
                 val r = McOnline.parseRecipe(get(McOnline.recipeUrl(e.apiId), language))
+                    ?.copy(isCommunity = e.apiId in communityIds)
                 if (r != null) batch += r
                 index[e.apiId.toString()] = e.stamp
                 inARow = 0

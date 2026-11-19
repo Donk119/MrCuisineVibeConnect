@@ -1,14 +1,18 @@
 package app.toque.core
 
 import app.toque.core.json.Json
+import app.toque.core.recipes.Ingredient
+import app.toque.core.recipes.IngredientGroup
 import app.toque.core.recipes.OriginalDbMapper
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeCodec
+import app.toque.core.recipes.RecipeFilter
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.SearchIndex
 import app.toque.core.recipes.StepProgram
 import app.toque.core.recipes.TextNorm
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -48,6 +52,20 @@ class RecipesTest {
         assertTrue(list.any { r -> r.steps.any { it.machine?.program == StepProgram.TOAST } })
     }
 
+    @Test fun communityMetadataSurvivesStorageAndLegacyRecipesDefaultToFalse() {
+        val legacy = RecipeCodec.decode("""{"id":"old","title":"Legacy recipe","source":"imported"}""")!!
+        assertFalse(legacy.isCommunity)
+        assertFalse(Recipe("new", "New recipe").isCommunity)
+        for (community in listOf(false, true)) {
+            val recipe = legacy.copy(id = "community-$community", isCommunity = community)
+            assertEquals(community, RecipeCodec.toMap(recipe)["isCommunity"])
+            assertEquals(recipe, RecipeCodec.decode(RecipeCodec.encode(recipe)))
+            val (recipes, bad) = RecipeCodec.decodeFile(RecipeCodec.encodeFile(listOf(recipe)), RecipeSource.IMPORTED)
+            assertEquals(0, bad)
+            assertEquals(listOf(recipe), recipes)
+        }
+    }
+
     @Test fun textNormalisation() {
         assertEquals("creme brulee", TextNorm.normalize("Crème  Brûlée !"))
         assertEquals(listOf("pomme", "terre"), TextNorm.tokens("Pommes de terre"))
@@ -74,6 +92,30 @@ class RecipesTest {
         assertEquals(2, soups.size)
         val withWhat = idx.withIngredients(listOf("oignon", "huile d'olive"))
         assertTrue(withWhat.first().matched == 2)
+    }
+
+    @Test fun communityFilterAppliesToBrowseTextAndIngredientsAndCombinesWithOtherFilters() {
+        val base = Recipe("official", "Tomatensuppe", category = "Suppen", totalMinutes = 20,
+            ingredients = listOf(IngredientGroup(items = listOf(Ingredient(name = "Tomate")))))
+        val community = base.copy(id = "community", favorite = true, isCommunity = true)
+        val slowerCommunity = community.copy(id = "slow-community", favorite = false, totalMinutes = 60)
+        val personal = base.copy(id = "personal", source = RecipeSource.USER)
+        // Persisted metadata, rather than title/author or RecipeSource.IMPORTED, drives the index.
+        val stored = listOf(base, community, slowerCommunity, personal).map { RecipeCodec.decode(RecipeCodec.encode(it))!! }
+        val index = SearchIndex(stored)
+        assertEquals(setOf("official", "community", "slow-community", "personal"), index.search("").map { it.entry.id }.toSet())
+        assertEquals(setOf("community", "slow-community"), index.entries.filter { it.isCommunity }.map { it.id }.toSet())
+        val filter = RecipeFilter(communityOnly = true)
+        val expected = setOf("community", "slow-community")
+        for (query in listOf("", "Tomatensuppe", "Tomatensupe", "Tomate")) {
+            assertEquals(query, expected, index.search(query, filter).map { it.entry.id }.toSet())
+        }
+        assertEquals(expected, index.withIngredients(listOf("Tomate"), filter).map { it.entry.id }.toSet())
+        val combined = filter.copy(category = "Suppen", favoritesOnly = true, source = RecipeSource.IMPORTED, maxMinutes = 30)
+        assertEquals(listOf("community"), index.search("Tomatensuppe", combined).map { it.entry.id })
+        assertEquals(listOf("community"), index.withIngredients(listOf("Tomate"), combined).map { it.entry.id })
+        assertTrue(index.search("", filter.copy(source = RecipeSource.USER)).isEmpty())
+        assertTrue(index.withIngredients(listOf("Tomate"), filter.copy(category = "Desserts")).isEmpty())
     }
 
     @Test fun searchSpeed() {

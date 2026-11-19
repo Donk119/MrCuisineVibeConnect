@@ -416,5 +416,7 @@
   "Étapes %d à %d · %s": "Schritte %d bis %d · %s",
   "écriture impossible": "Schreiben fehlgeschlagen",
   "… et %d autres": "… und %d weitere",
-  "Inclure les recettes de la communauté": "Community-Rezepte einbeziehen"
+  "Inclure les recettes de la communauté": "Community-Rezepte einbeziehen",
+  "Communauté": "Community",
+  "Recette de la communauté": "Community-Rezept"
 }

@@ -51,10 +51,12 @@ class RecipeScreen(a: MainActivity, private val recipe: Recipe) : Screen(a) {
 
         // Auteur et note du site.
         val byline = ArrayList<String>()
+        if (recipe.isCommunity) byline += tr("Recette de la communauté")
         if (recipe.author.isNotBlank()) byline += tr("Par %s", authorName(recipe.author))
         if (recipe.ratingCount > 0) byline += "★ " + tr("%s/5 · %d notes", rating(recipe.rating), recipe.ratingCount)
         if (byline.isNotEmpty()) {
-            left.addView(Ui.ellipsize(Ui.text(c, byline.joinToString("   "), 16f, Ui.TEXT2)), Ui.lp(t = 10))
+            left.addView(Ui.ellipsize(Ui.text(c, byline.joinToString("   "), 16f, Ui.TEXT2),
+                if (recipe.isCommunity) 2 else 1), Ui.lp(t = 10))
         }
 
         val actions = Ui.horizontal(c)

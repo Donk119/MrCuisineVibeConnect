@@ -138,6 +138,8 @@ data class Recipe(
     /** Note moyenne sur 5 et nombre de notes sur monsieur-cuisine.com (0 : aucune). */
     val rating: Double = 0.0,
     val ratingCount: Int = 0,
+    /** Recette publiée par un membre de la communauté, indépendamment de son stockage local. */
+    val isCommunity: Boolean = false,
 ) {
     val machineSteps: Int get() = steps.count { it.machine != null }
     val allIngredients: List<Ingredient> get() = ingredients.flatMap { it.items }
@@ -163,6 +165,7 @@ object RecipeCodec {
         "author" to r.author,
         "rating" to r.rating,
         "ratingCount" to r.ratingCount,
+        "isCommunity" to r.isCommunity,
         "ingredients" to r.ingredients.map { g ->
             linkedMapOf(
                 "group" to g.title,
@@ -232,6 +235,7 @@ object RecipeCodec {
             author = m.str("author")?.trim().orEmpty(),
             rating = (m.double("rating") ?: 0.0).coerceIn(0.0, 5.0),
             ratingCount = (m.int("ratingCount") ?: 0).coerceAtLeast(0),
+            isCommunity = m.bool("isCommunity") ?: false,
         )
     }
 

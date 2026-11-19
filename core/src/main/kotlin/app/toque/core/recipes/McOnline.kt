@@ -181,6 +181,7 @@ object McOnline {
             author = r["author"].obj().str("name")?.trim().orEmpty(),
             rating = (r.double("rating") ?: 0.0).coerceIn(0.0, 5.0),
             ratingCount = (r.int("totalRating") ?: 0).coerceAtLeast(0),
+            isCommunity = r["source"] == "member",
         )
     }
 

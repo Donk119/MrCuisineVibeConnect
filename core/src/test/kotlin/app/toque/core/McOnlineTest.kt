@@ -5,6 +5,7 @@ import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.StepProgram
 import app.toque.core.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -194,6 +195,27 @@ class McOnlineTest {
         assertEquals(36, McOnline.reviewHeaders("fr-FR")["X-Request-Id"]!!.length)
         val updated = McOnline.withScore(McOnline.parseRecipe(fixture("mc-online-recipe.json"))!!, McOnline.Entry(900001, "", "", "", 4.6, 510))
         assertEquals(4.6, updated.rating, 0.001); assertEquals(510, updated.ratingCount); assertEquals("Chef d'essai", updated.author)
+    }
+
+    @Test fun communityMembershipRequiresExplicitMemberSourceAndSurvivesScoreRefresh() {
+        fun recipe(source: Any?, includeSource: Boolean = true) = McOnline.parseRecipe(Json.write(mapOf(
+            "data" to mapOf("recipe" to linkedMapOf<String, Any?>(
+                "id" to 42, "name" to "Community-shaped recipe",
+                "author" to mapOf("name" to "Member name"),
+                "thumbnail" to mapOf("landscape" to "https://mc-web-user-content-cdn.tecpal.com/image_thumbnail.jpg"),
+            ).apply { if (includeSource) this["source"] = source }),
+        )))!!
+        val member = recipe("member")
+        assertTrue(member.isCommunity)
+        assertTrue(RecipeCodec.decode(RecipeCodec.encode(member))!!.isCommunity)
+        val refreshed = McOnline.withScore(member, McOnline.Entry(42, "", "", "Updated author", 4.6, 10))
+        assertTrue(refreshed.isCommunity)
+        assertEquals("Updated author", refreshed.author)
+        assertEquals(4.6, refreshed.rating, 0.001)
+        for (source in listOf(null, "official", "unknown", "Member", " member ", true, 1)) {
+            assertFalse("Source $source must not imply community membership", recipe(source).isCommunity)
+        }
+        assertFalse(recipe(null, includeSource = false).isCommunity)
     }
 
     @Test fun unusable() {

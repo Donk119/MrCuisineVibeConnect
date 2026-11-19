@@ -137,6 +137,7 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         }
         val base = RecipeFilter()
         chip(tr("Toutes"), filter == base, base)
+        chip(tr("Communauté"), filter.communityOnly, base.copy(communityOnly = true))
         chip(tr("Favoris"), filter.favoritesOnly, base.copy(favoritesOnly = true))
         chip(tr("30 min max"), filter.maxMinutes == 30, base.copy(maxMinutes = 30))
         for (cat in a.app.recipes.index.categories.take(30)) chip(cat, filter.category == cat, base.copy(category = cat))
@@ -216,6 +217,8 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         val title = Ui.ellipsize(Ui.text(c, "", 18f, Ui.TEXT, Ui.MEDIUM), 2)
         val meta = Ui.ellipsize(Ui.text(c, "", 15f, Ui.TEXT2))
         val star = Icon(c, Icon.Kind.STAR_FILLED, Ui.ACCENT)
+        val community = Ui.chip(c, tr("Communauté"), color = 0xFF1A0E05.toInt(), bg = Ui.ACCENT, size = 14f)
+            .apply { visibility = View.GONE }
 
         init {
             root.tag = this
@@ -224,6 +227,9 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
             image.scaleType = ImageView.ScaleType.CENTER_CROP
             imageBox.addView(initials, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
             imageBox.addView(image, Ui.flp())
+            imageBox.addView(community, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply {
+                setMargins(Ui.u(8), Ui.u(8), Ui.u(40), 0)
+            })
             imageBox.addView(star, Ui.flp(Ui.u(26), Ui.u(26), Gravity.TOP or Gravity.END).apply { setMargins(0, Ui.u(10), Ui.u(10), 0) })
             imageBox.clipToOutline = true
             imageBox.outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -243,6 +249,7 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
             if (e.totalMinutes > 0) parts += "${e.totalMinutes} min"
             if (e.category.isNotBlank()) parts += e.category
             meta.text = parts.joinToString(" · ")
+            community.visibility = if (e.isCommunity) View.VISIBLE else View.GONE
             star.visibility = if (a.app.recipes.isFavorite(e.id)) View.VISIBLE else View.GONE
             imageBox.background = Ui.gradient(Ui.placeholderColors(e.title), 0f)
             initials.text = Ui.initials(e.title)
