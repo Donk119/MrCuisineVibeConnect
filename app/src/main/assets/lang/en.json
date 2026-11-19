@@ -415,5 +415,6 @@
   "Étapes": "Steps",
   "Étapes %d à %d · %s": "Steps %d to %d · %s",
   "écriture impossible": "write failed",
-  "… et %d autres": "… and %d more"
+  "… et %d autres": "… and %d more",
+  "Inclure les recettes de la communauté": "Include community recipes"
 }

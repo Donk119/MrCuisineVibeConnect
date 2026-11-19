@@ -109,6 +109,12 @@ class Prefs(context: Context) {
             p.edit().putBoolean("autoSync", v).commit()
         }
 
+    var includeCommunity: Boolean
+        get() = p.getBoolean("includeCommunity", false)
+        set(v) {
+            p.edit().putBoolean("includeCommunity", v).commit()
+        }
+
     var lastSyncMs: Long
         get() = p.getLong("lastSyncMs", 0)
         set(v) {

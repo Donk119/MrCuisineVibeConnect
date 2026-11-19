@@ -15,6 +15,7 @@ import app.toque.core.machine.MachineEvent
 import app.toque.core.machine.SafetyPolicy
 import app.toque.core.machine.Snapshot
 import app.toque.core.protocol.Mcc
+import app.toque.core.recipes.GuidedStepPolicy
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.StepProgram
 import app.toque.ui.HoldButton
@@ -150,13 +151,11 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
 
     private lateinit var startBtn: View
     private var turboBtn: HoldButton? = null
-    private var reviewBtn: View? = null
     private var panelState: TextView? = null
 
     private fun buildPanel() {
         panel.removeAllViews()
         turboBtn = null
-        reviewBtn = null
         val m = recipe.steps[index].machine
         if (m == null) {
             val box = Ui.vertical(c, Gravity.CENTER)
@@ -233,14 +232,15 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 buildPanel()
                 onSnapshot(a.snapshot)
             }
-            reviewBtn = rb
             panel.addView(rb, Ui.lp(b = 10))
             panelInfo = tr("Réglage importé : vérifiez-le avant de lancer.")
         }
         panelState?.text = panelInfo
         if (m.program == StepProgram.TURBO) {
             val t = HoldButton(c, tr("Maintenir pour Turbo"), onDown = {
-                a.machine.turboDown(m.accessory) { v -> if (!v.ok) a.refusal(v) }
+                if (GuidedStepPolicy.canRun(recipe.steps[index], index in reviewed)) {
+                    a.machine.turboDown(m.accessory) { v -> if (!v.ok) a.refusal(v) }
+                }
             }, onUp = { a.machine.turboUp() })
             turboBtn = t
             startBtn = t
@@ -254,13 +254,14 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 a.push(ManualScreen(a, m))
             }, Ui.lp(t = 8))
         }
-        val blocked = violations.isNotEmpty() || (step.needsReview && index !in reviewed)
-        Ui.setButtonEnabled(startBtn, !blocked)
+        Ui.setButtonEnabled(startBtn, GuidedStepPolicy.canRun(step, index in reviewed))
     }
 
     private fun launch() {
         val first = index
-        val m = recipe.steps[first].machine ?: return
+        val step = recipe.steps[first]
+        if (!GuidedStepPolicy.canRun(step, first in reviewed)) return
+        val m = step.machine ?: return
         val series = series(first)
         val job = series ?: m.toJob(tr("Étape %d · %s", first + 1, recipe.title), hotBlendConfirmed = hotBlendOk) ?: return
         val count = series?.phases?.size ?: 1
@@ -303,20 +304,10 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
      * L'étape [i] continue directement la précédente : un réglage machine seul (pas de texte
      * à suivre, pas de pesée), après une autre étape machine. Le Turbo reste toujours à l'appui.
      */
-    private fun continues(i: Int): Boolean {
-        val s = recipe.steps.getOrNull(i) ?: return false
-        val m = s.machine ?: return false
-        val prev = recipe.steps.getOrNull(i - 1)?.machine ?: return false
-        return m.program != StepProgram.TURBO && prev.program != StepProgram.TURBO && s.weigh == null &&
-            (s.text.isBlank() || s.text == m.summary) && m.violations().isEmpty()
-    }
+    private fun continues(i: Int): Boolean = GuidedStepPolicy.canContinue(recipe.steps, i, reviewed)
 
     /** Nombre d'étapes qui s'enchaîneront après l'étape [i]. */
-    private fun chainLength(i: Int): Int {
-        var n = 0
-        while (continues(i + n + 1)) n++
-        return n
-    }
+    private fun chainLength(i: Int): Int = GuidedStepPolicy.chainLength(recipe.steps, i, reviewed)
 
     override fun onSnapshot(s: Snapshot) {
         val w = recipe.steps.getOrNull(index)?.weigh
@@ -332,19 +323,18 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             seenPhase = s.phaseIndex
             val current = launchedStep + s.phaseIndex.coerceIn(0, launchedCount - 1)
             for (k in launchedStep until current) done += k
-            reviewed += current
             if (current != index) {
                 go(current)
                 return
             }
         }
-        val m = recipe.steps.getOrNull(index)?.machine ?: return
+        val step = recipe.steps.getOrNull(index) ?: return
+        val m = step.machine ?: return
         val mine = running && index >= launchedStep && index < launchedStep + launchedCount
         val ps = panelState
         if (m.program != StepProgram.TURBO && ::startBtn.isInitialized) {
             startBtn.visibility = if (mine && s.state != JobState.FINISHED && s.state != JobState.ABORTED) View.GONE else View.VISIBLE
-            if (s.busy && !mine) Ui.setButtonEnabled(startBtn, false)
-            else if (reviewBtn == null && m.violations().isEmpty()) Ui.setButtonEnabled(startBtn, !s.busy)
+            Ui.setButtonEnabled(startBtn, !s.busy && GuidedStepPolicy.canRun(step, index in reviewed))
         }
         if (!mine && ps != null) {
             if (index in done) {
@@ -367,7 +357,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             }
         }
         turboBtn?.let { t ->
-            t.isEnabled = !s.busy || s.turboActive
+            t.isEnabled = GuidedStepPolicy.turboEnabled(step, index in reviewed, s.busy, s.turboActive)
             t.alpha = if (t.isEnabled) 1f else 0.35f
         }
     }
@@ -385,8 +375,6 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 if (index == finished) {
                     a.machine.clearFinished()
                     if (index < recipe.steps.size - 1) {
-                        // Étape enchaînée : le réglage a été vu avec la première étape de la série.
-                        if (chain) reviewed += finished + 1
                         go(finished + 1)
                         if (chain) launch()
                     }

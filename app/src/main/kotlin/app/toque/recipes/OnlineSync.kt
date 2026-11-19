@@ -23,7 +23,8 @@ import java.util.Date
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Recettes officielles du Monsieur Cuisine connect, téléchargées directement depuis
+ * Recettes officielles du Monsieur Cuisine connect et, si activées, celles de la communauté,
+ * téléchargées directement depuis
  * monsieur-cuisine.com (API publique, sans compte) : la liste complète, puis seulement les
  * fiches nouvelles ou modifiées, et enfin les photos (réduites pour l'écran du robot).
  * Requêtes espacées pour ne pas charger les serveurs. Reprend où elle s'est arrêtée.
@@ -49,27 +50,45 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     private fun run(progress: (String) -> Unit): LidlSync.Report {
+        val includeCommunity = prefs.includeCommunity
         val language = McOnline.languageFor(I18n.code)
         val stored = readIndex()
         val index = if (stored.first == language) HashMap(stored.second) else HashMap()
 
-        // 1. Liste complète (résumés).
+        // 1. Toutes les listes sélectionnées doivent être complètes avant toute modification.
         progress(tr("Liste des recettes…"))
-        val entries = ArrayList<McOnline.Entry>()
-        var page = 1
-        var pages = 1
-        while (page <= pages) {
-            val p = try {
-                McOnline.parsePage(get(McOnline.listUrl(page), language))
-            } catch (e: IOException) {
-                return LidlSync.Report(false, tr("Serveur de recettes injoignable : %s", e.message ?: e.toString()))
+        val entriesById = LinkedHashMap<Long, McOnline.Entry>()
+        try {
+            for (source in McOnline.sources(includeCommunity)) {
+                val feedIds = HashSet<Long>()
+                var page = 1
+                var pages = 1
+                var total = 0
+                while (page <= pages) {
+                    val p = McOnline.parsePage(get(McOnline.listUrl(page, source), language))
+                    require(p.currentPage == page) { "Unexpected recipe page for ${source.apiValue}: ${p.currentPage}/$page" }
+                    if (page == 1) {
+                        require(p.total > 0) { tr("Aucune recette reçue du serveur") }
+                        pages = p.totalPages
+                        total = p.total
+                    } else {
+                        require(p.totalPages == pages && p.total == total) { "Recipe catalogue changed during pagination: ${source.apiValue}" }
+                    }
+                    for (entry in p.entries) {
+                        require(feedIds.add(entry.apiId)) { "Duplicate recipe ID in ${source.apiValue}: ${entry.apiId}" }
+                        // An API recipe can move between sources; keep its stable web-<id> identity.
+                        if (!entriesById.containsKey(entry.apiId)) entriesById[entry.apiId] = entry
+                    }
+                    progress(tr("Liste des recettes… %d / %d", page, pages))
+                    page++
+                    pause(300)
+                }
+                require(feedIds.size == total) { "Incomplete recipe catalogue for ${source.apiValue}: ${feedIds.size}/$total" }
             }
-            pages = p.totalPages.coerceIn(1, 1000)
-            entries += p.entries
-            progress(tr("Liste des recettes… %d / %d", page, pages))
-            page++
-            pause(300)
+        } catch (e: Exception) {
+            return LidlSync.Report(false, tr("Synchronisation impossible : %s", e.message ?: e.toString()))
         }
+        val entries = ArrayList(entriesById.values)
         if (entries.isEmpty()) return LidlSync.Report(false, tr("Aucune recette reçue du serveur"))
 
         // 2. Fiches nouvelles ou modifiées ; pour les autres, seuls l'auteur et la note sont mis à jour.
@@ -242,7 +261,9 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     private fun pause(ms: Long) {
         try {
             Thread.sleep(ms)
-        } catch (_: InterruptedException) {
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw e
         }
     }
 

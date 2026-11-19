@@ -14,7 +14,8 @@ import app.toque.core.machine.Accessory
  * Recettes publiées sur monsieur-cuisine.com, lues directement par l'API publique du site
  * (sans compte, sans l'appli d'origine) puis converties au modèle de Toque.
  *
- * Seules les recettes officielles du Monsieur Cuisine connect sont demandées. Chaque étape
+ * Les recettes officielles du Monsieur Cuisine connect sont demandées par défaut ; le catalogue
+ * communautaire est facultatif. Chaque étape
  * porte son réglage machine (mode « customized », balance, turbo, vapeur, rissoler, pétrir).
  */
 object McOnline {
@@ -29,8 +30,18 @@ object McOnline {
     fun headers(language: String): Map<String, String> =
         linkedMapOf("Accept" to "application/json", "Accept-Language" to language, "device-type" to "web")
 
-    fun listUrl(page: Int): String =
-        "$API/api/v2/recipes/page/$page/size/$PAGE_SIZE?filters%5BdeviceTypes%5D%5B%5D=$DEVICE&filters%5Bsource%5D%5B%5D=official"
+    enum class CatalogueSource(val apiValue: String) {
+        OFFICIAL("official"), MEMBER("member")
+    }
+
+    fun sources(includeCommunity: Boolean): List<CatalogueSource> =
+        if (includeCommunity) listOf(CatalogueSource.OFFICIAL, CatalogueSource.MEMBER)
+        else listOf(CatalogueSource.OFFICIAL)
+
+    fun listUrl(page: Int, source: CatalogueSource = CatalogueSource.OFFICIAL): String {
+        require(page >= 1)
+        return "$API/api/v2/recipes/page/$page/size/$PAGE_SIZE?filters%5BdeviceTypes%5D%5B%5D=$DEVICE&filters%5Bsource%5D%5B%5D=${source.apiValue}"
+    }
 
     fun recipeUrl(apiId: Long): String = "$API/api/v2/recipes/$apiId"
 
@@ -67,7 +78,7 @@ object McOnline {
 
     private fun ratingText(r: Double): String = String.format(java.util.Locale.US, "%.2f", r)
 
-    class Page(val total: Int, val totalPages: Int, val entries: List<Entry>)
+    class Page(val total: Int, val totalPages: Int, val entries: List<Entry>, val currentPage: Int = 1)
 
     private fun Any?.long(): Long? = when (this) {
         is Number -> toLong()
@@ -77,18 +88,52 @@ object McOnline {
 
     /** Une page de la liste des recettes (résumés : identifiant, date de mise à jour, nom). */
     fun parsePage(json: String): Page {
-        val d = Json.parse(json).obj()["data"].obj()
-        val entries = d["recipes"].list().mapNotNull { any ->
+        // A malformed/partial list must never look like a successful empty catalogue: the
+        // synchronizer uses this list to decide which stored recipes may be removed.
+        val root = Json.parse(json) as? Map<*, *>
+        require(root != null && pageInteger(root["code"]) == 0L) { "Recipe API did not return a successful response" }
+        val d = root["data"] as? Map<*, *>
+        require(d != null && d["recipes"] is List<*>) { "Recipe API list is missing" }
+        fun count(key: String): Int {
+            val n = pageInteger(d[key])
+            require(n != null && n in 0..Int.MAX_VALUE.toLong()) { "Invalid recipe page field: $key" }
+            return n.toInt()
+        }
+        val total = count("total")
+        val pageSize = count("pageSize")
+        val currentPage = count("currentPage")
+        val reportedPages = count("totalPage")
+        require(pageSize in 1..PAGE_SIZE) { "Invalid recipe page size" }
+        val pages = if (total == 0) 1 else ((total.toLong() + pageSize - 1) / pageSize).toInt()
+        require(pages <= 1000 && (reportedPages == pages || total == 0 && reportedPages == 0)) {
+            "Inconsistent recipe page count"
+        }
+        require(currentPage in 1..pages) { "Invalid current recipe page" }
+        val rows = d["recipes"] as List<*>
+        val expected = minOf(pageSize.toLong(), total.toLong() - (currentPage - 1L) * pageSize).toInt()
+        require(rows.size == expected) { "Incomplete recipe page" }
+        if (d.containsKey("resultNo")) require(count("resultNo") == rows.size) { "Inconsistent recipe result count" }
+        val ids = HashSet<Long>()
+        val entries = rows.map { any ->
+            require(any is Map<*, *>) { "Invalid recipe list entry" }
             val r = any.obj()
-            val id = r["id"].long() ?: return@mapNotNull null
+            val id = pageInteger(r["id"])
+            val name = (r["name"] as? String)?.trim()
+            require(id != null && id > 0 && ids.add(id) && !name.isNullOrEmpty()) { "Invalid or duplicate recipe list entry" }
             Entry(
-                id, r.str("lastUpdated").orEmpty(), r.str("name")?.trim().orEmpty(),
+                id, r.str("lastUpdated").orEmpty(), name,
                 author = r["author"].obj().str("name")?.trim().orEmpty(),
                 rating = (r.double("rating") ?: 0.0).coerceIn(0.0, 5.0),
                 ratingCount = (r.int("totalRating") ?: 0).coerceAtLeast(0),
             )
         }
-        return Page(d.int("total") ?: entries.size, d.int("totalPage") ?: 1, entries)
+        return Page(total, pages, entries, currentPage)
+    }
+
+    private fun pageInteger(value: Any?): Long? = when (value) {
+        is Long -> value
+        is String -> value.trim().toLongOrNull()
+        else -> null
     }
 
     /** Fiche complète (réponse de [recipeUrl]) convertie en recette Toque ; null si inutilisable. */

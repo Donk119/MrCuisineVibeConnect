@@ -133,6 +133,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         b2.addView(Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         b2.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52) { a.openVendorApp() })
         lidl.addView(b2, Ui.lp(t = 6))
+        lidl.addView(toggle(tr("Inclure les recettes de la communauté"), a.prefs.includeCommunity) { a.prefs.includeCommunity = it }, Ui.lp(t = 10))
         lidl.addView(toggle(tr("Synchro automatique chaque nuit"), a.prefs.autoSync) { a.prefs.autoSync = it }, Ui.lp(t = 10))
 
         // ---- Mises à jour
